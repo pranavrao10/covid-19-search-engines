@@ -1,2 +1,5 @@
 #add files types in here to be ignored by the linter
 
+# OS files
+.DS_Store
+Thumbs.db
