@@ -3,4 +3,10 @@
 # OS files
 .DS_Store
 Thumbs.db
-.pkl
+*.pkl
+*.npy
+*.db
+*.ftz
+*.json
+*jsonl
+*.zip
