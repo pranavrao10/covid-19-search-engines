@@ -4,3 +4,10 @@
 .DS_Store
 Thumbs.db
 .pkl
+*.npy
+*.pkl
+*.zip
+*.ftz
+*.json
+*.jsonl
+*.db
