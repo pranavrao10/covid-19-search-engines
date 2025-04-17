@@ -6,6 +6,9 @@ from transformers import AutoTokenizer, AutoModel
 import torch
 from sklearn.metrics.pairwise import cosine_similarity
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="huggingface_hub.file_download")
+
 class COVIDSearchEngine:
     def __init__(self):
         self.load_resources()
