@@ -1,6 +1,10 @@
+print('\n........Initialising Search Engine. Please wait :)........')
 import json
 import numpy as np
+import torch
 from scipy.sparse import load_npz
+from transformers import AutoTokenizer, AutoModel
+from sklearn.metrics.pairwise import cosine_similarity
 
 
 #The code below loads the necessary data stored in arrays, scipy.sparse_matrix, and a python dictionary to calculate dirichlet prior scores (p(q|d))
@@ -8,10 +12,18 @@ loaded_arrays_for_index_building = np.load('dirichlet_lm_index_variables/necessa
 probability_of_term_in_collection_multiplied_with_mu = loaded_arrays_for_index_building['mu_scaled_term_collection_probability']
 document_lengths_plus_mu = loaded_arrays_for_index_building['mu_scaled_document_lengths']
 term_frequency_matrix = load_npz('dirichlet_lm_index_variables/term_frequency_matrix.npz')
-with open('dirichlet_lm_index_variables/document_ids_vocabulary_titles.json', 'r') as file:
+with open('dirichlet_lm_index_variables/document_ids_titles_snippets_vocabulary.json', 'r') as file:
     data = json.load(file)
 vocabulary = data['vocabulary']
-document_ids = data['document_ids']
+document_ids = np.array(data['document_ids']) #stored as a np.ndarray to allow ease of retrieval of top 100 document IDs using multi indices 
+document_titles = data['document_titles']
+abstract_snippets = data['abstract_snippets']
+
+#The code below loads the pre-computed embeddings for all the documents and initialises a biobert model to be used for reranking
+document_embeddings = np.load('bm25+biobert files/biobert_embeddings.npy', mmap_mode='r')    
+tokenizer = AutoTokenizer.from_pretrained("monologg/biobert_v1.1_pubmed")
+model = AutoModel.from_pretrained("monologg/biobert_v1.1_pubmed")
+model.eval() #because we only need to generate embeddings for query and no training is necessary
 
 #This code block calculates dirichlet prior scores (p(q|d)) for each document using the loaded variables when given a query
 def calculate_dirichlet_scores(query:list) -> dict:
@@ -21,20 +33,38 @@ def calculate_dirichlet_scores(query:list) -> dict:
     relevancy_scores_per_document = ((relevant_term_frequencies + relevant_mu_scaled_term_probabilities)/document_lengths_plus_mu).sum(axis = 1)
     return relevancy_scores_per_document.A1
 
+#This code block fetches the corresponding embeddings of the top 100 retrieved documents and re-ranks them using cosine similarity
+#between embedded query and embedded documents
+def biobert_reranker(query:str, relevancy_scores:list) -> list:
+    with torch.no_grad(): 
+        inputs = tokenizer(query, return_tensors="pt", padding=True, truncation=True, max_length=512)
+        embedded_query = model(**inputs).last_hidden_state[:,0,:].numpy()
+    indices_of_top_100_document_relevancy_scores = np.argsort(relevancy_scores)[::-1][:100]
+    corresponding_embeddings = document_embeddings[indices_of_top_100_document_relevancy_scores]
+    similarity_between_query_and_top_100_documents = cosine_similarity(embedded_query, corresponding_embeddings).flatten()
+    return indices_of_top_100_document_relevancy_scores[np.argsort(similarity_between_query_and_top_100_documents)[::-1]]
+
 #This code block below combines the dirichlet prior scores (p(q|d)) with their corresponding document IDs
 #and returns the results in descending order. Note, only the top 20 results are shown for brevity purposes.
-def dirichlet_searcher(relevancy_scores:list) -> dict:
-    results = dict(zip(document_ids, relevancy_scores))
-    results = dict(sorted(results.items(), key = lambda x: x[1], reverse = True))
-    for key, value in list(results.items())[:20]:
-        print(f'Doc ID: {key}   P(Q|D): {value}')
-    return dict(sorted(results.items(), key = lambda x: x[1], reverse = True))
+def dirichlet_searcher(query:list, top_k_results:int = 5) -> dict:
+    relevancy_scores_per_document = calculate_dirichlet_scores(query.split())
+    biobert_reranked_indices_of_top_100_documents = biobert_reranker(query, relevancy_scores_per_document)
+    for index in biobert_reranked_indices_of_top_100_documents[:top_k_results]:
+        print(document_titles[index])
+        print('-' * len(document_titles[index]))
+        print(f'ID: {document_ids[index]}      P(Q|D): {round(relevancy_scores_per_document[index], 6)}')
+        print('Snippet:')
+        print(abstract_snippets[index], '\n','\n')
+    return document_ids[biobert_reranked_indices_of_top_100_documents]
 
-print('Welcome to the Dirichlet Searcher for Covid-19 papers!')
+print('\nWelcome to the Dirichlet Searcher for Covid-19 papers!')
+print('Hit keyboard interrupt or type in \'exit\' to quit the search engine.')
 #The while loop is so the user can keep searching for articles until she/he/they gets tired and hits keyboard interrupt :)
 while True:
     print('')
     print('Please enter your query below.....')
     query = input('Search:')
-    relevancy_scores_per_document = calculate_dirichlet_scores(query.split())
-    search_results = dirichlet_searcher(relevancy_scores_per_document)
+    if query =='exit':
+        break
+    print('\nTop 5 Results:\n')
+    search_results = dirichlet_searcher(query)
