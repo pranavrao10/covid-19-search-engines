@@ -8,17 +8,23 @@ from scipy.sparse import save_npz
 
 #The below code block removes punctuation from document body texts, extracts document ids, and extracts document titles. 
 #These three variables are then returned.
-def process_documents(documents:list) -> list:
+def process_documents_in_jsonl(filepath_to_jsonl:str) -> list:
     #stemmer = SnowballStemmer("english")
     document_ids = []
+    document_titles = []
+    abstract_snippets = []
     body_texts = []
-    for document in documents:
-        document_ids.append(document['doc_id'])
-        #below should be uncommented if stemming is to be included
-        #cleaned_body_text = document['contents'].translate(str.maketrans('', '', string.punctuation)).split()
-        #cleaned_body_text = ' '.join([stemmer.stem(word) for word in cleaned_body_text])
-        body_texts.append(document['cleaned_text'].translate(str.maketrans('', '', string.punctuation)))
-    return document_ids, body_texts
+    with open (filepath_to_jsonl, 'r') as file:
+        for line in file:
+            document = json.loads(line)
+            document_ids.append(document['doc_id'])
+            #below should be uncommented if stemming is to be included
+            #cleaned_body_text = document['contents'].translate(str.maketrans('', '', string.punctuation)).split()
+            #cleaned_body_text = ' '.join([stemmer.stem(word) for word in cleaned_body_text])
+            document_titles.append(document['original_title'])
+            abstract_snippets.append(document['biobert']['abstract'][:165] + '...')
+            body_texts.append(document['bm25']['combined'])
+    return document_ids, document_titles, abstract_snippets, body_texts
 
 #The below code block builds a term frequency matrix and creates arrays containing values that are necessary to calculate
 #the dirichlet prior scores (p(q|d)) for each document.
@@ -31,20 +37,18 @@ def build_index(document_body_texts:list) -> np.ndarray:
     return term_frequency_matrix, vocabulary, probability_of_term_in_collection_multiplied_with_mu, document_lengths_plus_mu
 
 print('')
-print('Please enter the full filepath where the \'trec_covid_preprocessed_minimal.json\' file is located.')
+print('Please enter the full filepath where the \'preprocessed_cord19.jsonl\' file is located.')
 filepath = input('Full Filepath:')
 print('...Processing...')
-with open(filepath) as file:
-    dataset = json.load(file)
-
-document_ids, body_texts = process_documents(dataset)
+document_ids, document_titles, abstract_snippets, body_texts = process_documents_in_jsonl(filepath)
 term_frequency_matrix, vocabulary, probability_of_term_in_collection_multiplied_with_mu, document_lengths_plus_mu = build_index(body_texts)
-data = {'document_ids': document_ids, 'vocabulary': vocabulary}#storing these like so, as it is easier to dump them in json files and load them later
+#storing the below variables like so, as it is easier to dump them in json files and load them later:
+data = {'document_ids':document_ids, 'document_titles':document_titles, 'abstract_snippets':abstract_snippets, 'vocabulary': vocabulary}
 
 #The following code block saves the necessary pre-computed variables (arrays, scipy.sparse_matrix, and dictionaries) which 
 #will be loaded in main.py and used to calculate dirichlet prior scores (p(q|d)). This ensures that computing p(q|d)
 #upon receival of a query is fast as it is not bogged down by index building, which takes quite a bit of time.
-with open('dirichlet_lm_index_variables/document_ids_vocabulary_titles.json', 'w') as file:
+with open('dirichlet_lm_index_variables/document_ids_titles_snippets_vocabulary.json', 'w') as file:
     json.dump(data, file)
 np.savez('dirichlet_lm_index_variables/necessary_arrays_for_index_building.npz', 
          mu_scaled_term_collection_probability = probability_of_term_in_collection_multiplied_with_mu, 
