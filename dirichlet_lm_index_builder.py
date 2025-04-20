@@ -29,7 +29,7 @@ def process_documents_in_jsonl(filepath_to_jsonl:str) -> list:
 #The below code block builds a term frequency matrix and creates arrays containing values that are necessary to calculate
 #the dirichlet prior scores (p(q|d)) for each document.
 def build_index(document_body_texts:list) -> np.ndarray:
-    vectorizer = CountVectorizer()
+    vectorizer = CountVectorizer(token_pattern = r"(?u)\b[\w']+\b") #custom RegEx was used so that single characters (like '2') will be registered 
     term_frequency_matrix = vectorizer.fit_transform(document_body_texts)
     vocabulary = vectorizer.vocabulary_
     probability_of_term_in_collection_multiplied_with_mu = (term_frequency_matrix.sum(axis = 0)/term_frequency_matrix.sum()).A1 * 2000

@@ -1,11 +1,20 @@
 print('\n........Initialising Search Engine. Please wait :)........')
+import re
 import json
 import numpy as np
 import torch
+from nltk.stem import PorterStemmer
 from scipy.sparse import load_npz
 from transformers import AutoTokenizer, AutoModel
 from sklearn.metrics.pairwise import cosine_similarity
 
+
+#The code below loads the list of stop words, instantiates a RegEx object for stripping punctuation, and instantiates a Porter Stemmer object.
+#These variables are used by the 'process_query()' function which ensures the user input query is in a suitable format for the retrieval function
+with open('../covid-19-search-engines/dirichlet_lm_index_variables/stop_words.json', 'r') as file:
+    stop_words = json.load(file)['stop_words']
+strip_punctuation = re.compile(r"\b[\w]+\b")
+stemmer = PorterStemmer()
 
 #The code below loads the necessary data stored in arrays, scipy.sparse_matrix, and a python dictionary to calculate dirichlet prior scores (p(q|d))
 loaded_arrays_for_index_building = np.load('dirichlet_lm_index_variables/necessary_arrays_for_index_building.npz')
@@ -25,9 +34,14 @@ tokenizer = AutoTokenizer.from_pretrained("monologg/biobert_v1.1_pubmed")
 model = AutoModel.from_pretrained("monologg/biobert_v1.1_pubmed")
 model.eval() #because we only need to generate embeddings for query and no training is necessary
 
+def process_query(query:str) -> list:
+    processed_query = strip_punctuation.findall(query.lower())
+    processed_query = [stemmer.stem(word) for word in processed_query if word not in stop_words]
+    return processed_query
+
 #This code block calculates dirichlet prior scores (p(q|d)) for each document using the loaded variables when given a query
-def calculate_dirichlet_scores(query:list) -> dict:
-    indices_of_query_terms = [vocabulary[term] for term in query]
+def calculate_dirichlet_scores(query:str) -> np.ndarray:
+    indices_of_query_terms = [vocabulary[term] for term in process_query(query)]
     relevant_term_frequencies = term_frequency_matrix[:, indices_of_query_terms]
     relevant_mu_scaled_term_probabilities = probability_of_term_in_collection_multiplied_with_mu[indices_of_query_terms]
     relevancy_scores_per_document = ((relevant_term_frequencies + relevant_mu_scaled_term_probabilities)/document_lengths_plus_mu).sum(axis = 1)
@@ -46,8 +60,8 @@ def biobert_reranker(query:str, relevancy_scores:list) -> list:
 
 #This code block below combines the dirichlet prior scores (p(q|d)) with their corresponding document IDs
 #and returns the results in descending order. Note, only the top 20 results are shown for brevity purposes.
-def dirichlet_searcher(query:list, top_k_results:int = 5) -> dict:
-    relevancy_scores_per_document = calculate_dirichlet_scores(query.split())
+def dirichlet_searcher(query:str, top_k_results:int = 5) -> np.ndarray:
+    relevancy_scores_per_document = calculate_dirichlet_scores(query)
     biobert_reranked_indices_of_top_100_documents = biobert_reranker(query, relevancy_scores_per_document)
     for index in biobert_reranked_indices_of_top_100_documents[:top_k_results]:
         print(document_titles[index])
@@ -67,4 +81,4 @@ while True:
     if query =='exit':
         break
     print('\nTop 5 Results:\n')
-    search_results = dirichlet_searcher(query)
+    results = dirichlet_searcher(query)
